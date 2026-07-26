@@ -2200,7 +2200,7 @@ function resolveBaseUrl(preset, providerSettings) {
  * @param {object} preset Provider preset.
  * @returns {Promise<string>} The assistant's response content.
  */
-async function generateOpenAICompatibleResponse(baseUrl, apiKey, model, messages, maxTokens, preset) {
+async function generateOpenAICompatibleResponse(baseUrl, apiKey, model, messages, maxTokens, preset, abortSignal) {
     const verbose = extension_settings[MODULE_NAME].verboseLogging;
 
     // Route through ST server proxy if provider requires it (CORS bypass)
@@ -2221,6 +2221,7 @@ async function generateOpenAICompatibleResponse(baseUrl, apiKey, model, messages
             method: 'POST',
             headers: getRequestHeaders(),
             body: JSON.stringify(proxyBody),
+            signal: abortSignal,
         });
 
         if (!response.ok) {
@@ -2255,6 +2256,14 @@ async function generateOpenAICompatibleResponse(baseUrl, apiKey, model, messages
             throw new Error(`${preset.name || 'API'} error (via proxy): ${errorMsg}`);
         }
 
+        // A 200 with no choices/message at all is an unexpected shape, not a legitimate
+        // empty completion — some providers return this for malformed requests instead
+        // of an HTTP error. Surface it instead of silently returning '' (which reads
+        // upstream as "no new memories" and hides a real API problem).
+        if (!Array.isArray(data.choices) || data.choices.length === 0 || !msg) {
+            throw new Error(`${preset.name || 'API'} returned an unexpected response shape (no choices/message in body).`);
+        }
+
         // Fall back to reasoning_content for models that use thinking tokens
         return msg?.content || msg?.reasoning_content || '';
     }
@@ -2269,6 +2278,7 @@ async function generateOpenAICompatibleResponse(baseUrl, apiKey, model, messages
             max_tokens: maxTokens,
             temperature: 0.3,
         }),
+        signal: abortSignal,
     });
 
     if (!response.ok) {
@@ -2292,6 +2302,13 @@ async function generateOpenAICompatibleResponse(baseUrl, apiKey, model, messages
         logActivity(`Generate (direct) HTTP ${response.status}, model=${data.model || model}, finish=${data.choices?.[0]?.finish_reason || '?'}, ${tokens}${hasReasoning}`);
     }
 
+    // A 200 with no choices/message at all is an unexpected shape, not a legitimate
+    // empty completion. Surface it instead of silently returning '' (which reads
+    // upstream as "no new memories" and hides a real API problem).
+    if (!Array.isArray(data.choices) || data.choices.length === 0 || !msg) {
+        throw new Error(`${preset.name || 'API'} returned an unexpected response shape (no choices/message in body).`);
+    }
+
     // Fall back to reasoning_content for models that use thinking tokens
     return msg?.content || msg?.reasoning_content || '';
 }
@@ -2306,7 +2323,7 @@ async function generateOpenAICompatibleResponse(baseUrl, apiKey, model, messages
  * @param {object} preset Provider preset.
  * @returns {Promise<string>} The assistant's response content.
  */
-async function generateAnthropicResponse(baseUrl, apiKey, model, messages, maxTokens, preset) {
+async function generateAnthropicResponse(baseUrl, apiKey, model, messages, maxTokens, preset, abortSignal) {
     const headers = buildProviderHeaders(preset, apiKey);
 
     // Extract system message and convert to Anthropic format
@@ -2338,6 +2355,7 @@ async function generateAnthropicResponse(baseUrl, apiKey, model, messages, maxTo
         method: 'POST',
         headers,
         body: JSON.stringify(body),
+        signal: abortSignal,
     });
 
     if (!response.ok) {
@@ -2358,7 +2376,14 @@ async function generateAnthropicResponse(baseUrl, apiKey, model, messages, maxTo
         logActivity(`Generate (Anthropic) HTTP ${response.status}, model=${data.model || model}, stop=${data.stop_reason || '?'}, ${tokens}`);
     }
 
-    return (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('') || '';
+    // A 200 with no content array at all is an unexpected shape, not a legitimate
+    // empty completion. Surface it instead of silently returning '' (which reads
+    // upstream as "no new memories" and hides a real API problem).
+    if (!Array.isArray(data.content)) {
+        throw new Error('Anthropic returned an unexpected response shape (no content array in body).');
+    }
+
+    return data.content.filter(b => b.type === 'text').map(b => b.text).join('') || '';
 }
 
 /**
@@ -2367,7 +2392,7 @@ async function generateAnthropicResponse(baseUrl, apiKey, model, messages, maxTo
  * @param {number} maxTokens Max tokens for response.
  * @returns {Promise<string>} The assistant's response content.
  */
-async function generateProviderResponse(messages, maxTokens) {
+async function generateProviderResponse(messages, maxTokens, abortSignal) {
     const providerKey = extension_settings[MODULE_NAME].selectedProvider;
     const preset = PROVIDER_PRESETS[providerKey];
     if (!preset) throw new Error(`Unknown provider: ${providerKey}`);
@@ -2388,9 +2413,9 @@ async function generateProviderResponse(messages, maxTokens) {
     }
 
     if (preset.isAnthropic) {
-        return generateAnthropicResponse(baseUrl, apiKey, model, messages, maxTokens, preset);
+        return generateAnthropicResponse(baseUrl, apiKey, model, messages, maxTokens, preset, abortSignal);
     }
-    return generateOpenAICompatibleResponse(baseUrl, apiKey, model, messages, maxTokens, preset);
+    return generateOpenAICompatibleResponse(baseUrl, apiKey, model, messages, maxTokens, preset, abortSignal);
 }
 
 /**
@@ -2474,7 +2499,7 @@ async function generateProfileResponse(userPrompt, maxTokens, defaultSystemPromp
  * @param {string} [defaultSystemPrompt='You are a memory extraction assistant.'] Fallback system prompt.
  * @returns {Promise<string>} The LLM response.
  */
-async function callLLM(userPrompt, maxTokens, defaultSystemPrompt = 'You are a memory extraction assistant.') {
+async function callLLM(userPrompt, maxTokens, defaultSystemPrompt = 'You are a memory extraction assistant.', abortSignal) {
     const source = extension_settings[MODULE_NAME].source;
     if (source === EXTRACTION_SOURCE.PROVIDER) {
         const providerSettings = getProviderSettings(extension_settings[MODULE_NAME].selectedProvider);
@@ -2482,6 +2507,7 @@ async function callLLM(userPrompt, maxTokens, defaultSystemPrompt = 'You are a m
         return generateProviderResponse(
             [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
             maxTokens,
+            abortSignal,
         );
     }
     if (source === EXTRACTION_SOURCE.PROFILE) {
@@ -3035,8 +3061,15 @@ async function extractMemoriesInner({
                 const llmStartTime = Date.now();
                 let result;
                 try {
-                    result = await callLLM(prompt, extension_settings[MODULE_NAME].responseLength, 'You are a memory extraction assistant.');
+                    result = await callLLM(prompt, extension_settings[MODULE_NAME].responseLength, 'You are a memory extraction assistant.', abortSignal);
                 } catch (llmErr) {
+                    if (llmErr.name === 'AbortError' || abortSignal?.aborted) {
+                        // Extraction was stopped mid-request — treat like the abort checks
+                        // elsewhere in this loop (a clean stop), not an LLM failure.
+                        logActivity(`${logLabel} LLM call aborted (extraction stopped)`, 'warning');
+                        chunkAborted = true;
+                        break;
+                    }
                     if (isMultiTarget) {
                         logActivity(`${logLabel} LLM error: ${llmErr.message} — aborting chunk to preserve extraction pointer`, 'error');
                         toastr.error(t`Extraction failed for ${target.name}: ${llmErr.message}`, 'CharMemory');
