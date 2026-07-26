@@ -4,58 +4,43 @@ Living notes for this fork effort. Lives on the orphan `tools` branch so it neve
 shows up in diffs against upstream or in any PR we send them. Update this as things
 change — it's meant to let a session pick up cold.
 
-## PAUSED HERE — resume point (session paused mid-work, user wants to continue in a few hours)
+## Bugsweep — complete
 
-Just ran a multi-agent adversarial bugsweep workflow (6 finders + 3-lens verification)
-against `testing/all-fixes`. Result: **24 findings, all 24 survived verification (0
-refuted)**. Full raw findings are in the workflow output — not re-copied here yet, but
-the categories are listed under "Bugsweep findings" below with a fix/no-fix status per
-item. Working through them in priority order, one branch per fix (established convention).
+Ran a multi-agent adversarial bugsweep workflow (6 finders, each a different bug-class
+lens, + 3-lens adversarial verification per finding) against `testing/all-fixes`. Result:
+**24 findings, all 24 survived verification (0 refuted)**. All 24 are now fixed, each on
+its own branch, all merged into `testing/all-fixes` (2 small merge conflicts along the
+way — both were two branches independently adding the same kind of guard to the same
+function; resolved by combining them, not by picking one side). Pushed to the fork and
+synced to the live SillyTavern install.
 
-**Already fixed and merged into `testing/all-fixes`+ pushed to fork + synced to live ST
-install:**
-- Critical: `fix/reject-non-memory-extraction-fallback` had been committed earlier this
-  session but **never actually merged** into `testing/all-fixes` — caught by the sweep,
-  merged now. If you're auditing what the live install actually has, don't trust earlier
-  claims in this doc/conversation without checking `git merge-base --is-ancestor <branch>
-  testing/all-fixes`.
-- `fix/group-chat-message-buttons-missing` — Pin/Extract-here/Set-last-extracted buttons
-  were completely absent in group chats (missing `!context.groupId` fallback in
-  `addButtonsToExistingMessages`/`onMessageRenderedAddButtons`). Committed, NOT yet
-  merged into `testing/all-fixes` (next action after resume: merge it).
+The sweep also caught a real process mistake: `fix/reject-non-memory-extraction-fallback`
+had been committed earlier in the session but never actually merged into
+`testing/all-fixes` — the live install had been missing that fix despite earlier claims
+in-session that it was there. Merged immediately once found. Lesson: don't trust "is this
+merged" claims without checking `git merge-base --is-ancestor <branch> testing/all-fixes`.
 
-**In progress, not yet committed:** was about to fix `updateDashboardDiagSummary`
-(index.js ~line 1661, branch `fix/dashboard-diag-summary-xss`, currently checked out) —
-two bugs in the same tiny function: (1) missing `escapeHtml()` on `c.label`/`c.detail`
-before `.html()` — real stored-XSS path via a user-typed custom Data Bank filename,
-confirmed reachable since (2) the `issues` filter checks `c.status !== 'pass'` but checks
-only ever set `.level` not `.status`, so the filter always passes everything through
-every render. Fix both: escape the interpolated fields, and change the filter to
-`c.level !== 'green'`. Working tree was clean when paused (no edit applied yet).
+Branches from the bugsweep (all merged, none pushed individually or opened upstream yet):
+`fix/group-chat-message-buttons-missing`, `fix/dashboard-diag-summary-xss`,
+`fix/inapicall-lock-timing-siblings`, `fix/consolidation-unbulleted-output`,
+`fix/group-chat-gaps-conversion-health-diag`, `fix/stale-context-after-await-races`
+(+ a follow-up commit on `feature/inherit-pointer-on-checkpoint` for its own instance of
+the same race), `fix/lost-update-race-editor-saves`, `fix/thread-abort-signal-to-fetch`
+(2 commits — abort signal + shape-mismatch masking), `fix/error-handling-gaps`, a
+follow-up commit on `fix/data-bank-write-order-data-loss` (delete-step guard), and
+`fix/serialization-identity-edge-cases`.
 
-**Not started yet** — remaining bugsweep fix tasks (see TaskList in-session, or just
-re-derive from the categories below): apply the `inApiCall` lock-timing fix to
-`consolidateMemories`/`reformatMemories`/`previewConversion` (same pattern already used
-for `extractMemories`'s wrapper); fix the same "unbulleted LLM output saved verbatim" bug
-in `runConsolidationLLM` (consolidation path never got the fix that extraction got);
-remaining group-chat gaps (`previewConversion` never resolves group targets,
-`computeHealthScore`/`buildDiagnosticReport` only check `targets[0]`); stale-context-
-after-await races in `extractMemoriesInner` and `onChatChanged` (writes back to
-`chat_metadata` after an `await` without re-validating the chat is still active — this
-affects the checkpoint-inherit feature too); lost-update race in the editor-based save
-flows (`showMemoryManager`/`consolidateMemories`/`reformatMemories`/Troubleshooter editor
-snapshot-then-write with no re-check, unlike `previewConversion` which already re-reads
-before merging); 3 confirmed instances of unhandled rejection on the "Refresh Models"
-button; `runBatchExtraction` has no try/catch around its main loop (sticks the UI
-permanently on error); `writeMemoriesForCharacter`'s delete step isn't try/catch-guarded
-(can orphan an upload); `escapeAttr` in lib.js doesn't escape `<`/`>` (a theme label
-containing `>` corrupts `parseMemories` on next read); `batchState` keyed by character
-display name instead of avatar (collides on duplicate names).
+Two items from the original audit remain genuinely open (unconfirmed even after the
+sweep, not for lack of trying — the provider-llm lens specifically went looking):
+verbose-mode activity-log key-leak risk, and a possible uncaught rejection in
+`fetchProviderModels`'s primary fetch outside the one confirmed "Refresh Models" call
+site (which IS fixed). Both need live reproduction to resolve either way.
 
-**Next action on resume**: finish the XSS fix on the current branch, then work through
-the rest in the order listed above (roughly worst-impact first). Still nothing pushed as
-individual PR branches or opened upstream — everything funnels into `testing/all-fixes`
-for the user's live testing first.
+**Current state: nothing left in the known findings list.** 15 fix/feature branches total
+this session (see full branch map below), all merged into `testing/all-fixes`, all
+182 unit tests passing (up from 178 — added coverage for the escapeAttr `<`/`>` fix).
+Next steps are the user's call: live-test what's there, decide which branches become
+actual upstream PRs, or run another bugsweep pass if more thoroughness is wanted.
 
 ## Purpose
 
@@ -89,7 +74,7 @@ until we hear otherwise from the maintainer.
 | `fix/chunked-consolidation-retry-failed-chunks` | `runConsolidationLLM` gets `{ rethrow: true }` for the chunked path so the orchestrator's existing retry logic actually engages; added a failure toast when chunked consolidation exhausts retries (previously silent) | committed, not pushed/PR'd |
 | `fix/getCharacterName-characterId-mismatch` | Fallback now reads `characters[context.characterId]` instead of the module-level `this_chid` global | committed, not pushed/PR'd |
 | `fix/conversion-flow-edge-cases` | 4 fixes: `"* "` bullets recognized in the LLM-fallback parse; re-run warnings no longer gated behind block count; destination-merge confirms before silently dropping unparseable existing content; `getFilteredNanoGptModels` no longer assumes `capabilities` exists | committed, not pushed/PR'd |
-| `testing/all-fixes` | All 11 branches above merged together (clean merges throughout, zero conflicts) | **pushed to origin**, checked out live in the user's SillyTavern install (`D:\Applications\SillyTavern\...\sillytavern-character-memory`) — needs a hard-refresh in browser to pick up this latest batch |
+| `testing/all-fixes` | This table's 11 branches PLUS all 12 bugsweep branches (see "Bugsweep — complete" section above) — 23 branches total merged in (2 small conflicts resolved by combining, not picking a side) | **pushed to origin**, checked out live in the user's SillyTavern install (`D:\Applications\SillyTavern\...\sillytavern-character-memory`) — needs a hard-refresh in browser to pick up the latest batch |
 | `tools` | This orphan branch — notes/scratch only, no code history shared with the rest | pushed to origin |
 
 All individual `fix/*` and `feature/*` branches are based on `beta` and kept separate
