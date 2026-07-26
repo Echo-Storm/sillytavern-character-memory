@@ -3419,10 +3419,10 @@ async function onChatChanged() {
     const chatId = context.chatId || '(none)';
     const charName = getCharacterName() || '(none)';
     const msgCount = context.chat ? context.chat.length : 0;
-    // Used below to re-validate before writes that follow a real await (readMemoriesForCharacter
-    // is a network round trip) — the user can switch chats again while this invocation is
-    // still running, and a stale-metadata-reset write after that point would target the
-    // wrong chat's metadata object.
+    // Used below to re-validate before writes that follow a real await (fetchChatMessages
+    // and readMemoriesForCharacter are both network round trips) — the user can switch
+    // chats again while this invocation is still running, and a write after that point
+    // would target the wrong chat's metadata object.
     const savedChatId = context.chatId;
     const savedGroupId = context.groupId;
     const stillSameChat = () => getContext().chatId === savedChatId && getContext().groupId === savedGroupId;
@@ -3458,7 +3458,7 @@ async function onChatChanged() {
         try {
             const parent = await fetchChatMessages(chat_metadata.main_chat);
             const parentLastIdx = parent?.metadata?.[MODULE_NAME]?.lastExtractedIndex;
-            if (typeof parentLastIdx === 'number' && parentLastIdx >= 0) {
+            if (typeof parentLastIdx === 'number' && parentLastIdx >= 0 && stillSameChat()) {
                 const inherited = Math.min(parentLastIdx, msgCount - 1);
                 if (inherited >= 0) {
                     meta.lastExtractedIndex = inherited;
@@ -3508,12 +3508,12 @@ async function onChatChanged() {
                 }
                 if (hasAnyMemories) {
                     // no reset needed
-                } else if (stillSameChat()) {
+                } else if (!stillSameChat()) {
+                    logActivity('Skipped stale-metadata reset — chat changed while checking memory files', 'warning');
+                } else {
                     meta.lastExtractedIndex = -1;
                     saveMetadataDebounced();
                     logActivity(`Auto-reset lastExtractedIndex: was ${lastIdx} but memory file is empty — stale metadata`, 'warning');
-                } else {
-                    logActivity('Skipped stale-metadata reset — chat changed while checking memory files', 'warning');
                 }
             }
         } catch { /* ignore read errors */ }
