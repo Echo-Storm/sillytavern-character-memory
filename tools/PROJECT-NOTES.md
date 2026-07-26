@@ -32,7 +32,7 @@ until we hear otherwise from the maintainer.
 | `fix/deletion-pointer-clamp` | No `MESSAGE_DELETED` handling anywhere; clamp `lastExtractedIndex` in `ensureMetadata()` | committed, not pushed/PR'd |
 | `fix/reject-non-memory-extraction-fallback` | Un-bulleted LLM output (refusals, etc.) was saved as a memory verbatim | committed, not pushed/PR'd |
 | `feature/inherit-pointer-on-checkpoint` | Auto-inherit `lastExtractedIndex` from parent chat on ST checkpoint/branch | committed, **UNVERIFIED LIVE** — built from reading ST core source, not yet checkpoint-tested |
-| `testing/all-fixes` | All of the above merged together (clean merge, no conflicts) | **pushed to origin**, currently checked out live in the user's SillyTavern install for testing |
+| `testing/all-fixes` | All seven branches above merged together (clean merges, no conflicts) | **pushed to origin**, checked out live in the user's SillyTavern install (`D:\Applications\SillyTavern\...\sillytavern-character-memory`), confirmed loading cleanly (browser console + server log both checked, no CharMemory errors) |
 | `tools` | This orphan branch — notes/scratch only, no code history shared with the rest | pushed to origin |
 
 All individual `fix/*` and `feature/*` branches are based on `beta` and kept separate
@@ -96,9 +96,10 @@ before anything goes to GitHub or upstream.
 
 ## Full audit findings
 
-See `tools/AUDIT-NOTES.md` for the complete ranked findings list (architecture map,
-severity-ranked bugs, what's fixed vs. still open). High-severity findings are all
-fixed on branches listed above. Remaining open from the audit, not yet implemented:
+**Audit is complete** — every section of `index.js` (~9800 lines) plus `lib.js`,
+`editor.js`, `consolidation.js` has been read (directly or via background agent). See
+`tools/AUDIT-NOTES.md` for the complete ranked findings list. All 5 originally-found
+high/medium severity bugs are fixed (branches above). Remaining open, not yet implemented:
 
 - Abort signal never reaches actual `fetch()` calls in the LLM provider layer — "Stop
   extraction" can't cancel an in-flight single call.
@@ -106,8 +107,19 @@ fixed on branches listed above. Remaining open from the audit, not yet implement
   of surfacing an error.
 - Chunked consolidation drops failed chunks silently instead of retrying (maintainer-
   acknowledged limitation, documented in a code comment, not hidden).
-- Verbose-mode activity-log leak risk: worth checking live whether any LLM provider ever
-  echoes request headers/key fragments in an error body that gets logged.
+- `previewConversion`'s destination-merge could silently drop existing content that
+  `parseMemories` can't round-trip, before an atomic overwrite — needs live verification
+  with a hand-edited file, not clearly a bug without that.
+- `getCharacterName()` reads `characters[this_chid]` instead of
+  `characters[context.characterId]` after its own undefined-check — possible mismatch
+  during rapid character switches, needs live verification.
+- Smaller UI-polish-level items: `previewConversion` re-run silently no-ops on 0 blocks
+  with no toast, `convertWithLLM` only salvages `"- "` bullets (not `"* "`),
+  `getFilteredNanoGptModels` assumes every model has a `capabilities` array (could throw
+  on some live API responses).
+
+None of these remaining items are high-severity; they're candidates for a next pass,
+not blockers.
 
 ## Working conventions for this fork effort
 
