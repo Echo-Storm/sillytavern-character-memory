@@ -43,6 +43,11 @@ instead of concurrently (roughly doubles report-generation latency for large gro
 cosmetic, one-time, user-triggered, not worth the complexity of fixing unless someone
 actually complains about report-open speed.
 
+**One more follow-up**: the user flagged that the 3 sibling per-message buttons (Pin as
+memory, Extract from here, View injected context) had the same missing-`data-i18n` gap as
+the new Set-last-extracted button (fixed above) — pre-existing `beta` code the earlier fix
+deliberately left alone to keep #27 scoped. Went ahead and fixed all 3, same branch/PR.
+
 ### What's still NOT fixed, and why
 
 - **Verbose-mode activity-log key-leak risk** — no code path was found that logs request
