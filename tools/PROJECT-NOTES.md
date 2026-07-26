@@ -20,12 +20,28 @@ and a backlink comment on each of the rest.
 | [#26](https://github.com/bal-spec/sillytavern-character-memory/pull/26) | `pr/fix-xss-serialization-identity` | Stored XSS in dashboard health summary, escapeAttr not escaping `<`/`>`, getCharacterName identity mismatch, 2 conversion-flow gaps |
 | [#27](https://github.com/bal-spec/sillytavern-character-memory/pull/27) | `feature/issue-20-manual-extraction-pointer` | Closes issue #20 — manual "set as last-extracted point" button |
 | [#28](https://github.com/bal-spec/sillytavern-character-memory/pull/28) | `feature/inherit-pointer-on-checkpoint` | Auto-inherit extraction pointer on ST checkpoint/branch — **flagged unverified live** in its own description |
+| [#29](https://github.com/bal-spec/sillytavern-character-memory/pull/29) | `fix/drawer-state-and-wizard-reentrancy` | Drawer state-persistence bug, touch resize/swipe-close conflict, Setup Wizard reentrancy — 3 pre-existing `beta` bugs unrelated to the rest of the batch, found by a follow-up sweep |
 
 Every PR body has its own "Testing" section disclosing methodology honestly: which parts
 were manually clicked through in a live SillyTavern instance vs. which were verified only
 at the code level plus independent adversarial LLM review (3 reviewers per finding,
 arguing to refute — only findings that survived are in any PR). Didn't oversell "manually
 tested everything" anywhere.
+
+**Follow-up commits pushed after opening #22-#28**: a third adversarial sweep (targeting
+regression risk in the just-opened PRs themselves, plus areas the first two sweeps hadn't
+covered) found 9 more confirmed findings. 4 were real regressions introduced by this
+batch's own fixes — pushed directly as follow-up commits onto the already-open PR
+branches (#27 and #25 each got an i18n-wrapping fix; #24 got a fix for an unthrottled
+per-group-member network fan-out in the new health check, plus a KoboldCPP model-
+discovery cache) so those PRs update in place rather than needing new ones. 3 were
+genuinely new pre-existing `beta` bugs → became #29. 2 were investigated and confirmed
+*not* problems (documented as "verified-acceptable" rather than silently dropped):
+`confirmOverwriteIfChangedSinceSnapshot`'s extra network read is a reasonable one-per-Save
+cost, and `buildDiagnosticReport` runs two independent network batches sequentially
+instead of concurrently (roughly doubles report-generation latency for large groups) —
+cosmetic, one-time, user-triggered, not worth the complexity of fixing unless someone
+actually complains about report-open speed.
 
 ### What's still NOT fixed, and why
 
