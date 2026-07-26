@@ -4,6 +4,57 @@ Living notes for this fork effort. Lives on the orphan `tools` branch so it neve
 shows up in diffs against upstream or in any PR we send them. Update this as things
 change — it's meant to let a session pick up cold.
 
+## PRs opened upstream — 2026-07-26
+
+Ran a second ("final singular") adversarial bugsweep after the first one below, then
+grouped all confirmed fixes by theme and opened 7 PRs against `bal-spec/sillytavern-
+character-memory:beta`. All cross-linked to each other via a comment on #22 (the index)
+and a backlink comment on each of the rest.
+
+| PR | Branch | Contents |
+|---|---|---|
+| [#22](https://github.com/bal-spec/sillytavern-character-memory/pull/22) | `pr/fix-reentrancy-races` | Double-trigger race on Extract/Consolidate/Reformat/Convert, stale-context-after-await writes, stale pointer after message deletion |
+| [#23](https://github.com/bal-spec/sillytavern-character-memory/pull/23) | `pr/fix-data-loss-races` | Delete-then-upload data-loss window, lost-update race in editor saves, non-functional block-selection picker |
+| [#24](https://github.com/bal-spec/sillytavern-character-memory/pull/24) | `pr/fix-group-chat-gaps` | Missing per-message buttons in group chats, broken group conversion flow, health/diagnostics only checking the first member |
+| [#25](https://github.com/bal-spec/sillytavern-character-memory/pull/25) | `pr/fix-llm-provider-robustness` | Unbulleted LLM output saved as memories (extraction + consolidation), chunked-consolidation retry, abort signal not reaching fetch, malformed-response masking, 2 unhandled-rejection/stuck-UI bugs |
+| [#26](https://github.com/bal-spec/sillytavern-character-memory/pull/26) | `pr/fix-xss-serialization-identity` | Stored XSS in dashboard health summary, escapeAttr not escaping `<`/`>`, getCharacterName identity mismatch, 2 conversion-flow gaps |
+| [#27](https://github.com/bal-spec/sillytavern-character-memory/pull/27) | `feature/issue-20-manual-extraction-pointer` | Closes issue #20 — manual "set as last-extracted point" button |
+| [#28](https://github.com/bal-spec/sillytavern-character-memory/pull/28) | `feature/inherit-pointer-on-checkpoint` | Auto-inherit extraction pointer on ST checkpoint/branch — **flagged unverified live** in its own description |
+
+Every PR body has its own "Testing" section disclosing methodology honestly: which parts
+were manually clicked through in a live SillyTavern instance vs. which were verified only
+at the code level plus independent adversarial LLM review (3 reviewers per finding,
+arguing to refute — only findings that survived are in any PR). Didn't oversell "manually
+tested everything" anywhere.
+
+### What's still NOT fixed, and why
+
+- **Verbose-mode activity-log key-leak risk** — no code path was found that logs request
+  headers directly, but a direct (non-proxied) provider's error body is captured via
+  `errorBody.error?.message || JSON.stringify(errorBody)` and written to the activity log
+  when verbose logging is on. OpenAI's real 401 behavior echoes a masked key fragment in
+  `error.message`; a provider with a non-standard error shape has its whole raw body
+  captured via the `JSON.stringify` fallback. The Log Drawer's "Save Log" button exports
+  this to a downloadable file explicitly meant for bug-report sharing. **Why not fixed**:
+  never actually reproduced against a real provider's real error response — the risk is
+  plausible from reading the code, not confirmed. Redacting proactively without a real
+  example risks either not catching the real leak shape or breaking legitimate debugging
+  info. Needs a live repro (an actual masked-key error from a real provider) before a
+  targeted fix makes sense.
+- **Possible uncaught rejection in `fetchProviderModels`'s primary fetch, outside the one
+  confirmed call site** — the "Refresh Models" button's missing `.catch()` (now fixed in
+  #25) was one confirmed instance of this pattern. Whether the SAME unguarded-primary-fetch
+  gap in `fetchProviderModels`/`fetchNanoGptModels` itself (not just that one caller) has
+  other reachable call sites that also lack a catch wasn't fully re-verified after the
+  fix — the two callers that already had try/catch (Connect button, Setup Wizard) are fine,
+  but a full audit of every `populateProviderModels()` call site wasn't completed. **Why
+  not fixed further**: the confirmed instance is fixed; chasing the theoretical remainder
+  without a specific failing call site to point at would be speculative.
+
+Both are documented here rather than silently dropped, per the standing rule in this
+project: don't build speculative fixes for bugs that haven't actually been seen to happen,
+but don't hide that they're still open either.
+
 ## Bugsweep — complete
 
 Ran a multi-agent adversarial bugsweep workflow (6 finders, each a different bug-class
@@ -36,11 +87,10 @@ verbose-mode activity-log key-leak risk, and a possible uncaught rejection in
 `fetchProviderModels`'s primary fetch outside the one confirmed "Refresh Models" call
 site (which IS fixed). Both need live reproduction to resolve either way.
 
-**Current state: nothing left in the known findings list.** 15 fix/feature branches total
-this session (see full branch map below), all merged into `testing/all-fixes`, all
-182 unit tests passing (up from 178 — added coverage for the escapeAttr `<`/`>` fix).
-Next steps are the user's call: live-test what's there, decide which branches become
-actual upstream PRs, or run another bugsweep pass if more thoroughness is wanted.
+**Superseded by the section above** — a second bugsweep pass ran after this one, and all
+20 fix/feature branches from both passes got grouped into the 7 PRs listed at the top of
+this file and opened upstream. Left this section intact as the historical record of the
+first pass.
 
 ## Purpose
 
