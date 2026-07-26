@@ -101,60 +101,53 @@ new chat gets `{ main_chat: <parent id> }` only. No CharMemory code compensates 
    `fix/reject-non-memory-extraction-fallback`. Un-bulleted entries are now skipped and
    logged instead of saved raw.
 
-6. **`abortSignal` never reaches the actual `fetch()` calls** (provider generator functions,
-   ~2186-2451). Checked only between chunks/targets, so "Stop extraction" can't cancel a
-   single slow/hung LLM call — it only takes effect after that call finally resolves.
-   Not yet fixed.
+6. ~~`abortSignal` never reaches the actual `fetch()` calls~~ — **FIXED**,
+   `fix/thread-abort-signal-to-fetch` (commit 1). Threaded through `callLLM` →
+   `generateProviderResponse` → the OpenAI-compatible/Anthropic generators, attached to
+   each `fetch()`'s `signal`. Dedicated API path only — Connection Profile/WebLLM/main-LLM
+   left unchanged (their call signatures aren't ours to guess at).
 
-7. **Silent shape-mismatch masking** (`generateOpenAICompatibleResponse` /
-   `generateAnthropicResponse`, ~2242/2279/2344). A 200 response with an unexpected body
-   shape (some providers do this) returns `''` rather than throwing — surfaces upstream as
-   "No new memories found," masking a real API/provider problem. Not yet fixed.
+7. ~~Silent shape-mismatch masking~~ — **FIXED**, `fix/thread-abort-signal-to-fetch`
+   (commit 2). Throws when a 200 response has no choices/message (OpenAI-compatible) or no
+   content array (Anthropic) at all; a present-but-genuinely-empty completion still returns
+   `''` as before.
 
-8. **Chunked consolidation drops failed chunks silently** (~7581-7591, acknowledged in a
-   code comment). `runConsolidationLLM` catches its own errors and returns `null`, so the
-   orchestrator's retry-on-throw path never fires — a transient network blip during a large
-   chunked consolidation just drops that chunk's memories rather than retrying. Documented
-   limitation, not hidden, but still a data-quality gap. Not yet fixed.
+8. ~~Chunked consolidation drops failed chunks silently~~ — **FIXED**,
+   `fix/chunked-consolidation-retry-failed-chunks`. `runConsolidationLLM` takes an opt-in
+   `{ rethrow: true }` used only by the chunked path, so the orchestrator's already-correct
+   retry logic actually engages. Also added a failure toast when retries are exhausted
+   (previously silent).
 
-9. **`previewConversion` destination-merge round-trip** (index.js ~1046-1053). When
-   converting into an existing CharMemory file, the flow does
-   `parseMemories(existingContent)` then overwrites with
-   `serializeMemories([...existingBlocks, ...newBlocks])`. If the existing file has any
-   content `parseMemories` can't fully round-trip (hand edits, slightly malformed
-   `<memory>` tags), that content is silently dropped and then the file is atomically
-   overwritten — permanent, no rollback since this is a confirmed-write, not the
-   delete-then-upload race. Depends on `parseMemories`'s real-world tolerance; worth
-   verifying live with a hand-edited file rather than assuming.
+9. **`previewConversion` destination-merge round-trip** (index.js ~1046-1053) —
+   **MITIGATED**, `fix/conversion-flow-edge-cases`. Didn't touch `parseMemories` itself
+   (still a real theoretical gap), but added a confirm prompt before overwriting when the
+   existing destination file has content but `parseMemories` finds zero blocks in it —
+   closes the *silent* data-loss path even though the underlying round-trip tolerance is
+   unchanged.
 
-10. **`getCharacterName()` fallback mismatch** (index.js ~1740-1743). Bails on
-    `context.characterId === undefined` but then reads name from the global
-    `characters[this_chid]` rather than `characters[context.characterId]`. If these two
-    ever diverge — e.g. a rapid character switch mid-async-operation, a hazard this same
-    file calls out elsewhere (`savedCharId`/`savedChatId` checks in `extractMemories`) —
-    the name baked into an LLM conversion prompt could belong to a different character
-    than the Data Bank file actually being written. Worth verifying live.
+10. ~~`getCharacterName()` fallback mismatch~~ — **FIXED**,
+    `fix/getCharacterName-characterId-mismatch`. Fallback now reads
+    `characters[context.characterId]` instead of the module-level `this_chid`.
 
 ### Low / worth verifying live, not confirmed
 
 - Verbose-mode error logging (`logActivity` of `JSON.stringify(errorBody)` on provider
   errors) — worth checking whether any provider ever echoes request headers/key fragments
-  in its error body, which would leak into the in-app activity log.
+  in its error body, which would leak into the in-app activity log. Not yet addressed.
 - `fetchProviderModels`/`fetchNanoGptModels` (~2083-2104): only the subscription sub-fetch
   is `.catch()`-guarded; a network-level rejection on the primary fetch may propagate
-  uncaught — didn't trace the UI caller far enough to confirm it's swallowed.
-- `previewConversion` re-run swallows failure explanation (~971-981): the warnings toast
-  only fires when the re-run returns ≥1 block. A re-run that legitimately returns 0 blocks
-  (e.g. heuristic parse of empty/freeform content) shows nothing — dialog just looks like
-  it did nothing, no explanation.
-- `convertWithLLM` bullet-salvage fallback (~706) only recognizes `"- "` bullets when no
-  `<memory>` tags are present; a response using `"* "` bullets is discarded entirely with
-  "No memories could be extracted," even though valid content existed.
-- `getFilteredNanoGptModels` (~1254) assumes every model object has a `capabilities` array
-  (`m.capabilities.includes('reasoning')`). If any live NanoGPT API response omits it, this
-  throws and `populateProviderModels`'s catch rethrows, breaking the whole model dropdown
-  whenever the "reasoning" filter is checked. Depends on NanoGPT's actual API shape — worth
-  verifying live rather than assuming.
+  uncaught — didn't trace the UI caller far enough to confirm it's swallowed. Not yet
+  addressed.
+- ~~`previewConversion` re-run swallows failure explanation~~ — **FIXED**,
+  `fix/conversion-flow-edge-cases`. Warnings now show unconditionally on re-run, matching
+  the initial conversion call; added a fallback message for the 0-blocks/0-warnings case.
+- ~~`getFilteredNanoGptModels` assumes `capabilities` exists~~ — **FIXED**,
+  `fix/conversion-flow-edge-cases`. Defaults to `[]`.
+- ~~`convertWithLLM` bullet-salvage fallback only recognized `"- "` bullets~~ — **FIXED**,
+  `fix/conversion-flow-edge-cases`. Now also recognizes `"* "`.
+
+All items in this section are now fixed except the two verbose-logging/uncaught-rejection
+items at the top, which remain open.
 
 ## Already fixed in beta (don't re-do)
 
@@ -186,9 +179,17 @@ full branch map and live-testing status:
 - **New feature**, not from the original issue list — auto-inherit extraction pointer on
   SillyTavern checkpoint/branch — `feature/inherit-pointer-on-checkpoint`
   (**unverified live** as of this writing)
+- **Finding #6** (abort signal) + **#7** (shape-mismatch masking) — `fix/thread-abort-signal-to-fetch`
+- **Finding #8** (chunked consolidation retries) — `fix/chunked-consolidation-retry-failed-chunks`
+- **Finding #10** (getCharacterName mismatch) — `fix/getCharacterName-characterId-mismatch`
+- **Finding #9** (mitigated) + the 3 fixed "low" items (re-run warnings, `"* "` bullets,
+  NanoGPT capabilities guard) — `fix/conversion-flow-edge-cases`
 
 All merged together into `testing/all-fixes`, currently checked out live in the user's
 SillyTavern install for testing. Nothing pushed as individual PR branches or opened
 against upstream yet.
 
-Findings #6-10 and the four "low / worth verifying live" items remain open, not yet fixed.
+**All originally-found findings are now fixed except two low-severity, unconfirmed items:**
+verbose-mode activity-log key-leak risk, and a possible uncaught rejection in
+`fetchProviderModels`'s primary fetch. Neither was ever confirmed as an actual bug —
+both need live reproduction before deciding whether they're worth touching.

@@ -32,7 +32,11 @@ until we hear otherwise from the maintainer.
 | `fix/deletion-pointer-clamp` | No `MESSAGE_DELETED` handling anywhere; clamp `lastExtractedIndex` in `ensureMetadata()` | committed, not pushed/PR'd |
 | `fix/reject-non-memory-extraction-fallback` | Un-bulleted LLM output (refusals, etc.) was saved as a memory verbatim | committed, not pushed/PR'd |
 | `feature/inherit-pointer-on-checkpoint` | Auto-inherit `lastExtractedIndex` from parent chat on ST checkpoint/branch | committed, **UNVERIFIED LIVE** — built from reading ST core source, not yet checkpoint-tested |
-| `testing/all-fixes` | All seven branches above merged together (clean merges, no conflicts) | **pushed to origin**, checked out live in the user's SillyTavern install (`D:\Applications\SillyTavern\...\sillytavern-character-memory`), confirmed loading cleanly (browser console + server log both checked, no CharMemory errors) |
+| `fix/thread-abort-signal-to-fetch` | 2 commits: thread `abortSignal` into extraction's `fetch()` calls; throw on unexpected 200-but-malformed provider response shapes instead of returning `''` | committed, not pushed/PR'd |
+| `fix/chunked-consolidation-retry-failed-chunks` | `runConsolidationLLM` gets `{ rethrow: true }` for the chunked path so the orchestrator's existing retry logic actually engages; added a failure toast when chunked consolidation exhausts retries (previously silent) | committed, not pushed/PR'd |
+| `fix/getCharacterName-characterId-mismatch` | Fallback now reads `characters[context.characterId]` instead of the module-level `this_chid` global | committed, not pushed/PR'd |
+| `fix/conversion-flow-edge-cases` | 4 fixes: `"* "` bullets recognized in the LLM-fallback parse; re-run warnings no longer gated behind block count; destination-merge confirms before silently dropping unparseable existing content; `getFilteredNanoGptModels` no longer assumes `capabilities` exists | committed, not pushed/PR'd |
+| `testing/all-fixes` | All 11 branches above merged together (clean merges throughout, zero conflicts) | **pushed to origin**, checked out live in the user's SillyTavern install (`D:\Applications\SillyTavern\...\sillytavern-character-memory`) — needs a hard-refresh in browser to pick up this latest batch |
 | `tools` | This orphan branch — notes/scratch only, no code history shared with the rest | pushed to origin |
 
 All individual `fix/*` and `feature/*` branches are based on `beta` and kept separate
