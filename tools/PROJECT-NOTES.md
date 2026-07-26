@@ -4,6 +4,59 @@ Living notes for this fork effort. Lives on the orphan `tools` branch so it neve
 shows up in diffs against upstream or in any PR we send them. Update this as things
 change — it's meant to let a session pick up cold.
 
+## PAUSED HERE — resume point (session paused mid-work, user wants to continue in a few hours)
+
+Just ran a multi-agent adversarial bugsweep workflow (6 finders + 3-lens verification)
+against `testing/all-fixes`. Result: **24 findings, all 24 survived verification (0
+refuted)**. Full raw findings are in the workflow output — not re-copied here yet, but
+the categories are listed under "Bugsweep findings" below with a fix/no-fix status per
+item. Working through them in priority order, one branch per fix (established convention).
+
+**Already fixed and merged into `testing/all-fixes`+ pushed to fork + synced to live ST
+install:**
+- Critical: `fix/reject-non-memory-extraction-fallback` had been committed earlier this
+  session but **never actually merged** into `testing/all-fixes` — caught by the sweep,
+  merged now. If you're auditing what the live install actually has, don't trust earlier
+  claims in this doc/conversation without checking `git merge-base --is-ancestor <branch>
+  testing/all-fixes`.
+- `fix/group-chat-message-buttons-missing` — Pin/Extract-here/Set-last-extracted buttons
+  were completely absent in group chats (missing `!context.groupId` fallback in
+  `addButtonsToExistingMessages`/`onMessageRenderedAddButtons`). Committed, NOT yet
+  merged into `testing/all-fixes` (next action after resume: merge it).
+
+**In progress, not yet committed:** was about to fix `updateDashboardDiagSummary`
+(index.js ~line 1661, branch `fix/dashboard-diag-summary-xss`, currently checked out) —
+two bugs in the same tiny function: (1) missing `escapeHtml()` on `c.label`/`c.detail`
+before `.html()` — real stored-XSS path via a user-typed custom Data Bank filename,
+confirmed reachable since (2) the `issues` filter checks `c.status !== 'pass'` but checks
+only ever set `.level` not `.status`, so the filter always passes everything through
+every render. Fix both: escape the interpolated fields, and change the filter to
+`c.level !== 'green'`. Working tree was clean when paused (no edit applied yet).
+
+**Not started yet** — remaining bugsweep fix tasks (see TaskList in-session, or just
+re-derive from the categories below): apply the `inApiCall` lock-timing fix to
+`consolidateMemories`/`reformatMemories`/`previewConversion` (same pattern already used
+for `extractMemories`'s wrapper); fix the same "unbulleted LLM output saved verbatim" bug
+in `runConsolidationLLM` (consolidation path never got the fix that extraction got);
+remaining group-chat gaps (`previewConversion` never resolves group targets,
+`computeHealthScore`/`buildDiagnosticReport` only check `targets[0]`); stale-context-
+after-await races in `extractMemoriesInner` and `onChatChanged` (writes back to
+`chat_metadata` after an `await` without re-validating the chat is still active — this
+affects the checkpoint-inherit feature too); lost-update race in the editor-based save
+flows (`showMemoryManager`/`consolidateMemories`/`reformatMemories`/Troubleshooter editor
+snapshot-then-write with no re-check, unlike `previewConversion` which already re-reads
+before merging); 3 confirmed instances of unhandled rejection on the "Refresh Models"
+button; `runBatchExtraction` has no try/catch around its main loop (sticks the UI
+permanently on error); `writeMemoriesForCharacter`'s delete step isn't try/catch-guarded
+(can orphan an upload); `escapeAttr` in lib.js doesn't escape `<`/`>` (a theme label
+containing `>` corrupts `parseMemories` on next read); `batchState` keyed by character
+display name instead of avatar (collides on duplicate names).
+
+**Next action on resume**: finish the XSS fix on the current branch, then work through
+the rest in the order listed above (roughly worst-impact first). Still nothing pushed as
+individual PR branches or opened upstream — everything funnels into `testing/all-fixes`
+for the user's live testing first.
+
 ## Purpose
 
 Standard contributor flow: fork `bal-spec/sillytavern-character-memory`, find/fix bugs,
